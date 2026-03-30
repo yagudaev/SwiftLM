@@ -661,9 +661,10 @@ extern "C" int mlx_fast_scaled_dot_product_attention(
 
 struct SSDStreamEntry {
     std::shared_ptr<mlx::core::fast::SSDStreamer> streamer;
-    // Maps expert_count -> (data_start_in_file, bytes_per_expert)
-    // Key is the number of experts in the tensor (dim 0)
-    std::unordered_map<size_t, std::pair<size_t, size_t>> expert_offset_map;
+    // Maps tensor_name -> (data_start_in_file, bytes_per_expert)
+    // Key MUST be tensor_name (not num_experts) because gate_proj/up_proj/down_proj
+    // all have E=256 in the same file and would collide if keyed by E.
+    std::unordered_map<std::string, std::pair<size_t, size_t>> tensor_offset_map;
 };
 
 static std::mutex streamer_cache_mutex;
@@ -696,57 +697,61 @@ extern "C" int mlx_fast_streamed_gather_mm(
         auto it = streamer_cache.find(path);
         if (it != streamer_cache.end()) {
             streamer = it->second.streamer;
-            auto& emap = it->second.expert_offset_map;
-            auto eit = emap.find(E);
-            if (eit != emap.end()) {
-                data_start    = eit->second.first;
-                bytes_per_expert = eit->second.second;
+            auto& tmap = it->second.tensor_offset_map;
+            auto tit = tmap.find(target_tensor);
+            if (tit != tmap.end()) {
+                data_start       = tit->second.first;
+                bytes_per_expert = tit->second.second;
             }
         }
         
         if (!streamer || bytes_per_expert == 0) {
-            // Parse safetensors JSON header to find expert tensor layout
-            std::ifstream in(path, std::ios::binary);
-            if (!in.is_open()) throw std::runtime_error("[SSD] Cannot open: " + path);
+            bool has_tensor_offsets = (it != streamer_cache.end()) &&
+                                      (it->second.tensor_offset_map.count(target_tensor) > 0);
             
-            uint64_t hlen = 0;
-            in.read(reinterpret_cast<char*>(&hlen), 8);
-            std::vector<char> hbuf(hlen);
-            in.read(hbuf.data(), hlen);
-            auto j = nlohmann::json::parse(hbuf.data(), hbuf.data() + hlen);
-            in.close();
-            
-            // The data section begins after the 8-byte length prefix + JSON header
-            size_t data_section_start = 8 + hlen;
-            
-            // Find a tensor whose first dim matches E (our expert count)
-            // All expert weight tensors have shape [E, OD, ID_packed]
-            // bytes_per_expert = OD * ID_packed * dtype_bytes
-            // Search for the specific matching tensor_name
-            for (auto& item : j.items()) {
-                if (item.key() == target_tensor) {
-                    auto& v = item.value();
-                    auto offsets = v.at("data_offsets").get<std::vector<size_t>>();
-                    size_t tensor_data_start = data_section_start + offsets[0];
-                    size_t tensor_total_bytes = offsets[1] - offsets[0];
-                    bytes_per_expert = tensor_total_bytes / E;
-                    data_start = tensor_data_start;
-                    break;
-                }
-            }
-            
-            if (bytes_per_expert == 0) {
-                throw std::runtime_error("[SSD] Could not find exactly match for tensor " + target_tensor + " containing " + std::to_string(E) + " experts in " + path);
-            }
-            
-            if (!streamer) {
-                streamer = std::make_shared<mlx::core::fast::SSDStreamer>(path, bytes_per_expert);
-                SSDStreamEntry entry;
-                entry.streamer = streamer;
-                entry.expert_offset_map[E] = {data_start, bytes_per_expert};
-                streamer_cache[path] = std::move(entry);
+            if (has_tensor_offsets) {
+                auto& p = it->second.tensor_offset_map.at(target_tensor);
+                data_start = p.first;
+                bytes_per_expert = p.second;
             } else {
-                streamer_cache[path].expert_offset_map[E] = {data_start, bytes_per_expert};
+                // Parse safetensors JSON header to find expert tensor layout
+                std::ifstream in(path, std::ios::binary);
+                if (!in.is_open()) throw std::runtime_error("[SSD] Cannot open: " + path);
+                
+                uint64_t hlen = 0;
+                in.read(reinterpret_cast<char*>(&hlen), 8);
+                std::vector<char> hbuf(hlen);
+                in.read(hbuf.data(), hlen);
+                auto j = nlohmann::json::parse(hbuf.data(), hbuf.data() + hlen);
+                in.close();
+                
+                size_t data_section_start = 8 + hlen;
+                
+                for (auto& item : j.items()) {
+                    if (item.key() == target_tensor) {
+                        auto& v = item.value();
+                        auto offsets = v.at("data_offsets").get<std::vector<size_t>>();
+                        size_t tensor_data_start = data_section_start + offsets[0];
+                        size_t tensor_total_bytes = offsets[1] - offsets[0];
+                        bytes_per_expert = tensor_total_bytes / E;
+                        data_start = tensor_data_start;
+                        break;
+                    }
+                }
+                
+                if (bytes_per_expert == 0) {
+                    throw std::runtime_error("[SSD] Could not find tensor " + target_tensor + " in " + path);
+                }
+                
+                if (!streamer) {
+                    streamer = std::make_shared<mlx::core::fast::SSDStreamer>(path, bytes_per_expert);
+                    SSDStreamEntry entry;
+                    entry.streamer = streamer;
+                    entry.tensor_offset_map[target_tensor] = {data_start, bytes_per_expert};
+                    streamer_cache[path] = std::move(entry);
+                } else {
+                    streamer_cache[path].tensor_offset_map[target_tensor] = {data_start, bytes_per_expert};
+                }
             }
         }
     }
