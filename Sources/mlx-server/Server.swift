@@ -441,6 +441,7 @@ struct MLXServer: AsyncParsableCommand {
         }
 
         // Health (enhanced v3 with memory + stats + partition plan)
+        let isSSDStream = self.streamExperts  // capture before escaping closure
         router.get("/health") { _, _ -> Response in
             let activeMemMB = Memory.activeMemory / (1024 * 1024)
             let peakMemMB = Memory.peakMemory / (1024 * 1024)
@@ -451,7 +452,7 @@ struct MLXServer: AsyncParsableCommand {
             // Build partition info string
             var partitionJson = ""
             if let plan = partitionPlan {
-                let isSSD = streamExperts
+                let isSSD = isSSDStream
                 var pData: [String: Any] = [
                     "strategy": isSSD ? "ssd_streaming" : plan.strategy.rawValue,
                     "overcommit_ratio": round(plan.overcommitRatio * 100) / 100,
