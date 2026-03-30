@@ -4,6 +4,7 @@
 
 #include "mlx/core/moe_stream_op.h"
 #include <iostream>
+#include <iomanip>
 #include <chrono>
 #include <atomic>
 #include "mlx/primitives.h"
@@ -57,26 +58,35 @@ public:
         auto end_read = std::chrono::high_resolution_clock::now();
 
         // ─────────────────────────────────────────────────────────────────────
-        // AGGREGATE LOGGING — 1-second metric intervals
+        // AGGREGATE LOGGING — 10-second metric intervals, printed to stderr so
+        // the metric lines never interleave with the stdout token stream.
         // ─────────────────────────────────────────────────────────────────────
         g_total_bytes_read += matrix_bytes;
         g_total_read_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(end_read - start_read).count();
         g_read_count++;
 
-        auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
         uint64_t last = g_last_log_ns.load();
-        
-        if (now_ns - last >= 1000000000ULL) {
+
+        // 10-second throttle (was 1 s) — keeps metrics visible without flooding
+        if (now_ns - last >= 10'000'000'000ULL) {
             if (g_last_log_ns.compare_exchange_strong(last, now_ns)) {
-                size_t count = g_read_count.exchange(0);
-                size_t bytes = g_total_bytes_read.exchange(0);
-                uint64_t ns_time = g_total_read_ns.exchange(0);
-                if (count > 0) {
-                    double avg_ms = (ns_time / 1000000.0) / count;
-                    double mb = bytes / (1024.0 * 1024.0);
-                    std::cout << "[⚡️ SSD Stream] " << mb << " MB/s over " 
-                              << count << " chunks | Avg latency per chunk: " 
-                              << avg_ms << " ms" << std::endl;
+                size_t count  = g_read_count.exchange(0);
+                size_t bytes  = g_total_bytes_read.exchange(0);
+                uint64_t ns_t = g_total_read_ns.exchange(0);
+                if (count > 0 && ns_t > 0) {
+                    // True throughput: total bytes / total wall-clock read time
+                    double elapsed_s  = ns_t / 1e9;
+                    double throughput_mbs = (bytes / (1024.0 * 1024.0)) / elapsed_s;
+                    double avg_ms_per_chunk = (ns_t / 1'000'000.0) / count;
+                    // Print to stderr — never touches the stdout token stream
+                    std::cerr << "[⚡️ SSD Stream] "
+                              << std::fixed << std::setprecision(0);
+                    std::cerr << throughput_mbs << " MB/s | "
+                              << count << " chunks | avg "
+                              << std::setprecision(3) << avg_ms_per_chunk << " ms/chunk"
+                              << std::endl;
                 }
             }
         }
