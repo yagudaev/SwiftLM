@@ -148,6 +148,18 @@ curl http://localhost:5413/v1/chat/completions \
 
 Built entirely on the hard work of the Apple MLX community.
 - [mlx-swift](https://github.com/ml-explore/mlx-swift) — Apple MLX framework for Swift
-- [Hummingbird](https://github.com/hummingbird-project/hummingbird) — Event-driven Swift HTTP server 
+- [Hummingbird](https://github.com/hummingbird-project/hummingbird) — Event-driven Swift HTTP server
+
+### 🙏 TurboQuant Credits
+
+The TurboQuant KV cache compression implemented in `mlx-server` is directly based on the following open-source work and research:
+
+- **[TheTom/llama-cpp-turboquant](https://github.com/TheTom/llama-cpp-turboquant/tree/feature/turboquant-kv-cache)** — The primary reference for the C and Metal GPU implementation. The `turbo-wht.h` Fast Walsh-Hadamard kernel, WHT sign arrays (seed=42), Lloyd-Max centroid tables, and the `ggml-turbo-quant.c` quantize/dequantize logic were ported directly from this repository into our MLX C++ and Metal backend.
+
+- **[TheTom/turboquant_plus](https://github.com/TheTom/turboquant_plus)** — Python reference implementation used to validate the algorithm math, codebook construction (Lloyd's algorithm for N(0, 1/d)), and KV cache integration design.
+
+- **TurboQuant Paper** — *"TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate"*, Zandieh et al., AISTATS/ICLR 2026. The two-stage PolarQuant + QJL algorithm described in Section 3 and Appendix A is the mathematical foundation of this implementation.
+
+- **[amirzandieh/QJL](https://github.com/amirzandieh/QJL)** — Original Quantized Johnson-Lindenstrauss (QJL) 1-bit residual correction implementation by the paper authors.
 
 **MIT License**
