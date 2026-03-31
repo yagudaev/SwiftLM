@@ -278,6 +278,30 @@ public enum MLXFast {
         return (kTuple, vTuple)
     }
 
+    /// Batch-decode TurboKV compressed key history (packed uint8) back to float32.
+    ///
+    /// - Parameter packed: `[..., 68]` uint8 for D=128, or `[..., 136]` for D=256
+    /// - Returns: `[..., headDim]` float32 — caller casts to model dtype as needed
+    public static func turboDecodeK(
+        packed: MLXArray, stream: StreamOrDevice = .default
+    ) -> MLXArray {
+        var result = mlx_array_new()
+        mlx_fast_turbo_decode_k(&result, packed.ctx, stream.ctx)
+        return MLXArray(result)
+    }
+
+    /// Batch-decode TurboKV compressed value history (packed uint8) back to float32.
+    ///
+    /// - Parameter packed: `[..., 50]` uint8 for D=128, or `[..., 100]` for D=256
+    /// - Returns: `[..., headDim]` float32 — caller casts to model dtype as needed
+    public static func turboDecodeV(
+        packed: MLXArray, stream: StreamOrDevice = .default
+    ) -> MLXArray {
+        var result = mlx_array_new()
+        mlx_fast_turbo_decode_v(&result, packed.ctx, stream.ctx)
+        return MLXArray(result)
+    }
+
     // ── SSD Flash-Stream Metrics ──────────────────────────────────────────────
 
     /// Snapshot of cumulative SSD streaming throughput stats.

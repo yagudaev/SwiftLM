@@ -814,8 +814,44 @@ extern "C" int mlx_fast_turbo_encode(
     return 0;
 }
 
+extern "C" int mlx_fast_turbo_decode_k(
+    mlx_array* res,
+    const mlx_array packed,
+    const mlx_stream s) {
+    try {
+        mlx_array_set_(
+            *res,
+            mlx::core::fast::turbo_decode_k(
+                mlx_array_get_(packed),
+                mlx_stream_get_(s)));
+    } catch (std::exception& e) {
+        mlx_error(e.what());
+        return 1;
+    }
+    return 0;
+}
+
+extern "C" int mlx_fast_turbo_decode_v(
+    mlx_array* res,
+    const mlx_array packed,
+    const mlx_stream s) {
+    try {
+        mlx_array_set_(
+            *res,
+            mlx::core::fast::turbo_decode_v(
+                mlx_array_get_(packed),
+                mlx_stream_get_(s)));
+    } catch (std::exception& e) {
+        mlx_error(e.what());
+        return 1;
+    }
+    return 0;
+}
+
+
 extern "C" int mlx_fast_prefault(
     mlx_array x) {
+
     try {
         mlx::core::prefault(mlx_array_get_(x));
     } catch (std::exception& e) {

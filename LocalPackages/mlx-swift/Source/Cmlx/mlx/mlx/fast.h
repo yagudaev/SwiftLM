@@ -118,4 +118,20 @@ MLX_API array turbo_encode_k(const array& keys, StreamOrDevice s = {});
  */
 MLX_API array turbo_encode_v(const array& values, StreamOrDevice s = {});
 
+/**
+ * Decode TurboKV compressed K-cache back to float32.
+ *
+ * packed: uint8 with last dim 68 (D=128) or 136 (D=256)
+ * returns: float32 array with last dim = head_dim (128 or 256)
+ */
+MLX_API array turbo_decode_k(const array& packed, StreamOrDevice s = {});
+
+/**
+ * Decode TurboKV compressed V-cache back to float32.
+ *
+ * packed: uint8 with last dim 50 (D=128) or 100 (D=256)
+ * returns: float32 array with last dim = head_dim (128 or 256)
+ */
+MLX_API array turbo_decode_v(const array& packed, StreamOrDevice s = {});
+
 } // namespace mlx::core::fast

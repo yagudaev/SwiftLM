@@ -1054,4 +1054,91 @@ array turbo_encode_v(const array& values, StreamOrDevice s_) {
   return array(buf.data(), out_shape, uint8);
 }
 
+
+// ── TurboQuant Decode ─────────────────────────────────────────────────────────
+// Batch-decode packed uint8 compressed history back to float32 tensors.
+// Used by KVCacheSimple when routing compressed history through standard SDPA.
+// Supports head_dim=128 (record=68B K / 50B V) and head_dim=256 (2 sub-groups).
+
+array turbo_decode_k(const array& packed, StreamOrDevice s_) {
+  auto s = to_stream(s_);
+
+  const int record_bytes = static_cast<int>(packed.shape(-1));
+  if (record_bytes != TURBO_K_RECORD && record_bytes != TURBO_K_RECORD * 2) {
+    throw std::invalid_argument(
+        "[turbo_decode_k] last dim must be 68 (D=128) or 136 (D=256), got " +
+        std::to_string(record_bytes));
+  }
+  const int n_subgroups = record_bytes / TURBO_K_RECORD;
+  const int head_dim = n_subgroups * ::mlx::core::fast::TURBO_D;
+
+  // Materialise packed buffer on CPU
+  auto packed_u8 = astype(packed, uint8, s);
+  eval(packed_u8);
+  const uint8_t* src = packed_u8.data<uint8_t>();
+
+  const int N = static_cast<int>(packed_u8.size() / record_bytes);
+  std::vector<float> buf(static_cast<size_t>(N) * head_dim);
+
+  for (int i = 0; i < N; ++i) {
+    for (int g = 0; g < n_subgroups; ++g) {
+      const uint8_t* sub_src = src + i * record_bytes + g * TURBO_K_RECORD;
+      ::mlx::core::fast::TurboQuantK rec;
+      std::memset(&rec, 0, sizeof(rec));
+      std::memcpy(rec.indices,    sub_src,      48);
+      std::memcpy(rec.qjl_signs,  sub_src + 48, 16);
+      std::memcpy(&rec.norm_fp16,  sub_src + 64,  2);
+      std::memcpy(&rec.rnorm_fp16, sub_src + 66,  2);
+      ::mlx::core::fast::turbo_dequantize_k(
+          rec,
+          buf.data() + i * head_dim + g * ::mlx::core::fast::TURBO_D,
+          ::mlx::core::fast::TURBO_D);
+    }
+  }
+
+  Shape out_shape = packed.shape();
+  out_shape.back() = head_dim;
+  // Return float32; Swift caller casts to model dtype (fp16/bf16) as needed
+  return array(buf.data(), out_shape, float32);
+}
+
+array turbo_decode_v(const array& packed, StreamOrDevice s_) {
+  auto s = to_stream(s_);
+
+  const int record_bytes = static_cast<int>(packed.shape(-1));
+  if (record_bytes != TURBO_V_RECORD && record_bytes != TURBO_V_RECORD * 2) {
+    throw std::invalid_argument(
+        "[turbo_decode_v] last dim must be 50 (D=128) or 100 (D=256), got " +
+        std::to_string(record_bytes));
+  }
+  const int n_subgroups = record_bytes / TURBO_V_RECORD;
+  const int head_dim = n_subgroups * ::mlx::core::fast::TURBO_D;
+
+  auto packed_u8 = astype(packed, uint8, s);
+  eval(packed_u8);
+  const uint8_t* src = packed_u8.data<uint8_t>();
+
+  const int N = static_cast<int>(packed_u8.size() / record_bytes);
+  std::vector<float> buf(static_cast<size_t>(N) * head_dim);
+
+  for (int i = 0; i < N; ++i) {
+    for (int g = 0; g < n_subgroups; ++g) {
+      const uint8_t* sub_src = src + i * record_bytes + g * TURBO_V_RECORD;
+      ::mlx::core::fast::TurboQuantV rec;
+      std::memset(&rec, 0, sizeof(rec));
+      std::memcpy(rec.indices,   sub_src,      48);
+      std::memcpy(&rec.norm_fp16, sub_src + 48,  2);
+      ::mlx::core::fast::turbo_dequantize_v(
+          rec,
+          buf.data() + i * head_dim + g * ::mlx::core::fast::TURBO_D,
+          ::mlx::core::fast::TURBO_D);
+    }
+  }
+
+  Shape out_shape = packed.shape();
+  out_shape.back() = head_dim;
+  return array(buf.data(), out_shape, float32);
+}
+
 } // namespace mlx::core::fast
+

@@ -215,7 +215,18 @@ int mlx_fast_turbo_encode(
     int k_bits,
     const mlx_stream s);
 
+int mlx_fast_turbo_decode_k(
+    mlx_array* res,
+    const mlx_array packed,
+    const mlx_stream s);
+
+int mlx_fast_turbo_decode_v(
+    mlx_array* res,
+    const mlx_array packed,
+    const mlx_stream s);
+
 int mlx_fast_prefault(mlx_array x);
+
 
 // pread() directly into the already-evaluated MLX array's unified memory buffer.
 // This gives full NVMe sequential throughput without OS page-fault overhead.
