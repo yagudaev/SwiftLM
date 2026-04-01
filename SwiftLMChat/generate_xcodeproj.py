@@ -55,6 +55,7 @@ app_sources = [
     ("SwiftLMChat/Views/RootView.swift",           uid(), uid()),
     ("SwiftLMChat/Views/ChatView.swift",           uid(), uid()),
     ("SwiftLMChat/Views/MessageBubble.swift",      uid(), uid()),
+    ("SwiftLMChat/Views/ModelsView.swift",         uid(), uid()),
     ("SwiftLMChat/Views/ModelPickerView.swift",    uid(), uid()),
     ("SwiftLMChat/Views/ModelManagementView.swift",uid(), uid()),
     ("SwiftLMChat/Views/SettingsView.swift",       uid(), uid()),

@@ -114,38 +114,85 @@ public enum ModelCatalog {
             ramRecommendedGB: 24.0,
             badge: "🔬 Expert"
         ),
+        // ── Qwen3 dense series ───────────────────────────────────────────────
+        // Naming: mlx-community/Qwen3-{size}-4bit (no -Instruct suffix)
+        ModelEntry(
+            id: "mlx-community/Qwen3-0.6B-4bit",
+            displayName: "Qwen 3 0.6B",
+            parameterSize: "0.6B",
+            quantization: "4-bit",
+            ramRequiredGB: 0.5,
+            ramRecommendedGB: 1.0,
+            badge: "⚡ Tiny"
+        ),
+        ModelEntry(
+            id: "mlx-community/Qwen3-1.7B-4bit",
+            displayName: "Qwen 3 1.7B",
+            parameterSize: "1.7B",
+            quantization: "4-bit",
+            ramRequiredGB: 1.1,
+            ramRecommendedGB: 2.0,
+            badge: "⚡ Fast"
+        ),
+        ModelEntry(
+            id: "mlx-community/Qwen3-4B-4bit",
+            displayName: "Qwen 3 4B",
+            parameterSize: "4B",
+            quantization: "4-bit",
+            ramRequiredGB: 2.4,
+            ramRecommendedGB: 4.0,
+            badge: "🧠 Smart"
+        ),
+        ModelEntry(
+            id: "mlx-community/Qwen3-8B-4bit",
+            displayName: "Qwen 3 8B",
+            parameterSize: "8B",
+            quantization: "4-bit",
+            ramRequiredGB: 4.9,
+            ramRecommendedGB: 6.0,
+            badge: "🧠 Powerful"
+        ),
+        ModelEntry(
+            id: "mlx-community/Qwen3-14B-4bit",
+            displayName: "Qwen 3 14B",
+            parameterSize: "14B",
+            quantization: "4-bit",
+            ramRequiredGB: 8.5,
+            ramRecommendedGB: 12.0,
+            badge: "🔬 Expert"
+        ),
+        ModelEntry(
+            id: "mlx-community/Qwen3-32B-4bit",
+            displayName: "Qwen 3 32B",
+            parameterSize: "32B",
+            quantization: "4-bit",
+            ramRequiredGB: 19.0,
+            ramRecommendedGB: 24.0,
+            badge: "💎 Flagship"
+        ),
         // ── MoE models: ramRequiredGB = peak-resident (active experts only via mmap streaming)
         // File sizes are much larger but only active expert pages are in RAM at inference time.
         // These run via ExpertStreamingConfig on iPad Pro M4 (16GB+) and macOS.
         ModelEntry(
-            id: "mlx-community/Qwen3-30B-MoE-4bit",
+            id: "mlx-community/Qwen3-30B-A3B-4bit",
             displayName: "Qwen 3 30B MoE",
             parameterSize: "30B (active 3B)",
             quantization: "4-bit",
-            ramRequiredGB: 4.5,         // Dense layers ~3GB + top-2 active experts ~1.5GB
+            ramRequiredGB: 4.5,
             ramRecommendedGB: 8.0,
             isMoE: true,
             badge: "⚡ MoE Fast"
         ),
+        // Confirmed by user — tested on macOS with SSD streaming
         ModelEntry(
-            id: "mlx-community/DeepSeek-R1-0528-4bit",
-            displayName: "DeepSeek R1 0528",
-            parameterSize: "671B (active 37B)",
+            id: "mlx-community/Qwen3.5-35B-A3B-4bit",
+            displayName: "Qwen 3.5 35B MoE",
+            parameterSize: "35B (active 3B)",
             quantization: "4-bit",
-            ramRequiredGB: 8.0,         // Dense ~6GB + active MoE experts ~2GB
-            ramRecommendedGB: 16.0,
+            ramRequiredGB: 5.5,
+            ramRecommendedGB: 10.0,
             isMoE: true,
-            badge: "🧠 Reasoning"
-        ),
-        ModelEntry(
-            id: "mlx-community/Qwen3.5-122B-A10B-4bit",
-            displayName: "Qwen 3.5 122B (MoE)",
-            parameterSize: "122B (active 10B)",
-            quantization: "4-bit",
-            ramRequiredGB: 12.0,        // Dense ~8GB + active experts ~4GB
-            ramRecommendedGB: 48.0,
-            isMoE: true,
-            badge: "💎 Flagship"
+            badge: "⚡ MoE Turbo"
         ),
     ]
 

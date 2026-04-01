@@ -71,6 +71,8 @@ public final class InferenceEngine: ObservableObject {
 
     private var container: ModelContainer?
     private var currentModelId: String?
+    /// The ID of the last model that was successfully loaded. Remains set during .generating.
+    public var loadedModelId: String? { currentModelId }
     private var generationTask: Task<Void, Never>?
 
     // All NotificationCenter observers collected for clean deregistration
@@ -81,6 +83,10 @@ public final class InferenceEngine: ObservableObject {
 
     // Tracks the model ID active before app backgrounding so we can restore it on foreground.
     private var backgroundedModelId: String?
+    /// Timestamp of when the app entered background. Used to implement a
+    /// grace-period: short background sessions (<30 s) skip the unload cycle.
+    private var backgroundedAt: Date?
+    private static let backgroundGracePeriod: TimeInterval = 30
 
     public init() {
         setupPressureHandlers()
@@ -112,40 +118,56 @@ public final class InferenceEngine: ObservableObject {
             }
         )
 
-        // ── PROACTIVE: App will background ────────────────────────────────────
-        // Fire BEFORE iOS hands control back to springboard.
-        // At this moment the process is still fully foregrounded — Metal context
-        // is valid, memory limit hasn't changed. We unload now so iOS never
-        // accumulates memory pressure against us in the background.
+        // ── PROACTIVE: App entered background ───────────────────────────────
+        // didEnterBackground fires ONLY when the user truly leaves the app
+        // (home gesture / Lock button). willResignActive fires too broadly:
+        // notification banners, screenshots, system alerts — all trigger it.
         observers.append(
             NotificationCenter.default.addObserver(
-                forName: UIApplication.willResignActiveNotification,
+                forName: UIApplication.didEnterBackgroundNotification,
                 object: nil, queue: .main
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self, self.autoOffloadOnBackground else { return }
-                    // Remember what was loaded so we can restore it
-                    self.backgroundedModelId = self.currentModelId
-                    // Stop any in-flight generation cleanly
+
+                    self.backgroundedAt = Date()
+
+                    // Only remember model ID when it was actually loaded.
+                    switch self.state {
+                    case .ready(let id):  self.backgroundedModelId = id
+                    case .generating:     self.backgroundedModelId = self.currentModelId
+                    default:              self.backgroundedModelId = nil
+                    }
+
                     self.stopGeneration()
                     self.unload()
-                    self.state = .idle  // clean slate — no error banner on return
+                    self.state = .idle
                 }
             }
         )
 
-        // ── PROACTIVE: App returned to foreground ─────────────────────────────
-        // Silently reload the model the user was using before they left.
-        // We show .loading state so the chat UI doesn't appear broken.
+        // ── PROACTIVE: App returning to foreground ───────────────────────────
+        // willEnterForeground fires before the app is fully active, giving us
+        // time to start reloading before the UI appears.
         observers.append(
             NotificationCenter.default.addObserver(
-                forName: UIApplication.didBecomeActiveNotification,
+                forName: UIApplication.willEnterForegroundNotification,
                 object: nil, queue: .main
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self, self.autoOffloadOnBackground else { return }
-                    // Prefer the model that was active when we backgrounded;
-                    // fall back to the last persisted model the user chose.
+
+                    // Grace period: if the user was gone for less than 30 seconds
+                    // (e.g. a brief app-switcher peek), don't burn time reloading.
+                    let elapsed = self.backgroundedAt.map { Date().timeIntervalSince($0) } ?? 999
+                    self.backgroundedAt = nil
+
+                    guard elapsed >= Self.backgroundGracePeriod else {
+                        // Short absence — stay idle, let the user decide what to do.
+                        self.backgroundedModelId = nil
+                        return
+                    }
+
                     let modelToReload = self.backgroundedModelId
                         ?? self.downloadManager.lastLoadedModelId
                     self.backgroundedModelId = nil

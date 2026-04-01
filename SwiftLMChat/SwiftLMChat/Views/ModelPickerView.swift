@@ -193,7 +193,7 @@ private struct CatalogTab: View {
 
 // MARK: — HuggingFace Search Tab
 
-private struct HFSearchTab: View {
+struct HFSearchTab: View {
     let onSelect: (String) -> Void
 
     @StateObject private var service = HFModelSearchService.shared

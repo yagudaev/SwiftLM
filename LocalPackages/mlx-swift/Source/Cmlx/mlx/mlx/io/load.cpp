@@ -5,6 +5,20 @@
 #include <limits>
 #include <sstream>
 
+// Detect iOS for thread pool sizing.
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+// On iOS, limit I/O thread pool to 1 to prevent EXC_RESOURCE (RESOURCE_TYPE_WAKEUPS).
+// Each pread() completion wakes a thread; with 4 workers the wakeup rate exceeds
+// the iOS per-process budget during model loading.
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+  #define MLX_IO_THREAD_COUNT 1
+#else
+  #define MLX_IO_THREAD_COUNT 4
+#endif
+
 // Used by pread implementation.
 #ifdef _WIN32
 #include <windows.h>
@@ -335,12 +349,12 @@ array load(std::string file, StreamOrDevice s) {
 namespace io {
 
 ThreadPool& thread_pool() {
-  static ThreadPool pool_{4};
+  static ThreadPool pool_{MLX_IO_THREAD_COUNT};
   return pool_;
 }
 
 ThreadPool& ParallelFileReader::thread_pool() {
-  static ThreadPool thread_pool{4};
+  static ThreadPool thread_pool{MLX_IO_THREAD_COUNT};
   return thread_pool;
 }
 

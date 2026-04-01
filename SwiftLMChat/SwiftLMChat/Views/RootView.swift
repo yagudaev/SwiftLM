@@ -1,48 +1,100 @@
-// RootView.swift — Adaptive root layout: sidebar on Mac, stack on iOS
+// RootView.swift — Adaptive root layout: tab bar on iOS, sidebar on macOS
 import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var engine: InferenceEngine
     @StateObject private var viewModel = ChatViewModel()
+
+    // iOS: tab selection
+    @State private var selectedTab: Tab = .chat
+
+    // macOS sheets
     @State private var showModelPicker = false
     @State private var showSettings = false
+
+    enum Tab { case chat, models, settings }
 
     var body: some View {
         Group {
             #if os(macOS)
             macOSLayout
+                .sheet(isPresented: $showModelPicker) {
+                    ModelPickerView(onSelect: { modelId in
+                        showModelPicker = false
+                        Task { await engine.load(modelId: modelId) }
+                    })
+                    .environmentObject(engine)
+                }
+                .sheet(isPresented: $showSettings) {
+                    SettingsView(viewModel: viewModel)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .showModelPicker)) { _ in
+                    showModelPicker = true
+                }
+                .onAppear {
+                    viewModel.engine = engine
+                    if case .idle = engine.state { showModelPicker = true }
+                }
+                .onChange(of: engine.state) { _, state in
+                    if case .idle = state { showModelPicker = true }
+                }
             #else
-            iOSLayout
+            iOSTabView
+                .onAppear { viewModel.engine = engine }
             #endif
         }
-        .sheet(isPresented: $showModelPicker) {
-            ModelPickerView(onSelect: { modelId in
-                showModelPicker = false
-                Task { await engine.load(modelId: modelId) }
-            })
-            .environmentObject(engine)
+    }
+
+    // MARK: — iOS Tab View
+
+    #if os(iOS)
+    private var iOSTabView: some View {
+        TabView(selection: $selectedTab) {
+            // ── Chat Tab ────────────────────────────────────────────────
+            NavigationStack {
+                ChatView(viewModel: viewModel)
+                    .environmentObject(engine)
+            }
+            .tabItem {
+                Label("Chat", systemImage: selectedTab == .chat
+                      ? "bubble.left.and.bubble.right.fill"
+                      : "bubble.left.and.bubble.right")
+            }
+            .tag(Tab.chat)
+
+            // ── Models Tab ──────────────────────────────────────────────
+            NavigationStack {
+                ModelsView(viewModel: viewModel)
+                    .environmentObject(engine)
+            }
+            .tabItem {
+                Label("Models", systemImage: selectedTab == .models ? "cpu.fill" : "cpu")
+            }
+            .tag(Tab.models)
+            .badge(engine.downloadManager.activeDownloads.isEmpty ? 0 : engine.downloadManager.activeDownloads.count)
+
+            // ── Settings Tab ────────────────────────────────────────────
+            NavigationStack {
+                SettingsView(viewModel: viewModel, isTab: true)
+            }
+            .tabItem {
+                Label("Settings", systemImage: selectedTab == .settings ? "gearshape.fill" : "gearshape")
+            }
+            .tag(Tab.settings)
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(viewModel: viewModel)
-        }
+        // Navigate to Models tab when a model load is requested from chat
         .onReceive(NotificationCenter.default.publisher(for: .showModelPicker)) { _ in
-            showModelPicker = true
-        }
-        .onAppear {
-            viewModel.engine = engine
-            // Auto-show model picker if no model loaded
-            if case .idle = engine.state { showModelPicker = true }
-        }
-        .onChange(of: engine.state) { _, state in
-            if case .idle = state { showModelPicker = true }
+            selectedTab = .models
         }
     }
+    #endif
+
+    // MARK: — macOS Split View
 
     #if os(macOS)
     private var macOSLayout: some View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 0) {
-                // Sidebar: model status + new chat
                 modelStatusView
                 Divider()
                 List {
@@ -57,20 +109,12 @@ struct RootView: View {
         }
         .navigationTitle("")
     }
-    #endif
-
-    private var iOSLayout: some View {
-        ChatView(viewModel: viewModel, showSettings: $showSettings, showModelPicker: $showModelPicker)
-            .environmentObject(engine)
-    }
 
     private var modelStatusView: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(systemName: "cpu")
-                    .foregroundStyle(.secondary)
-                Text("SwiftLM")
-                    .font(.headline)
+                Image(systemName: "cpu").foregroundStyle(.secondary)
+                Text("SwiftLM").font(.headline)
                 Spacer()
             }
             engineStateView
@@ -83,8 +127,7 @@ struct RootView: View {
         switch engine.state {
         case .idle:
             Button("Load Model") { showModelPicker = true }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .buttonStyle(.borderedProminent).controlSize(.small)
         case .loading:
             Label("Loading…", systemImage: "arrow.2.circlepath")
                 .font(.caption).foregroundStyle(.secondary)
@@ -96,15 +139,14 @@ struct RootView: View {
             }
         case .ready(let modelId):
             Label(modelId.components(separatedBy: "/").last ?? modelId, systemImage: "checkmark.circle.fill")
-                .font(.caption).foregroundStyle(.green)
-                .lineLimit(1)
+                .font(.caption).foregroundStyle(.green).lineLimit(1)
         case .generating:
             Label("Generating…", systemImage: "ellipsis.bubble")
                 .font(.caption).foregroundStyle(.blue)
         case .error(let msg):
             Label(msg, systemImage: "exclamationmark.triangle")
-                .font(.caption).foregroundStyle(.red)
-                .lineLimit(2)
+                .font(.caption).foregroundStyle(.red).lineLimit(2)
         }
     }
+    #endif
 }
