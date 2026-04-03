@@ -4,6 +4,10 @@ import PackageDescription
 let package = Package(
     name: "SwiftLM",
     platforms: [.macOS(.v14), .iOS(.v17)],
+    products: [
+        .library(name: "MLXInferenceCore", targets: ["MLXInferenceCore"]),
+        .executable(name: "SwiftLM", targets: ["SwiftLM"])
+    ],
     dependencies: [
         // Local Apple MLX Swift fork for C++ extensions
         .package(path: "./LocalPackages/mlx-swift"),
