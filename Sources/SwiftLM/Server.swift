@@ -968,7 +968,7 @@ func handleChatCompletion(
     let prefillStart = Date()
 
     // ── Cache-aware generation ──
-    let stream: AsyncStream<Generation> = try await container.perform { context in
+    let (stream, onPrefillDone) = try await container.perform { context -> (AsyncStream<Generation>, (() async -> Void)?) in
         let cache = context.model.newCache(parameters: params)
 
         // ── TurboQuant: enable 3-bit KV compression on every KVCacheSimple layer ──
@@ -983,6 +983,7 @@ func handleChatCompletion(
         }
 
         // Try to restore via token-by-token prefix match (llama-server style)
+        var stream: AsyncStream<Generation>
         if let cachedCount = await promptCache.restore(newTokens: promptTokens, into: cache) {
             // Cache hit: KV state is pre-populated up to cachedCount tokens.
             // Only compute the remaining (new) tokens.
@@ -996,21 +997,22 @@ func handleChatCompletion(
             }
             let remainingTokens = lmInput.text.tokens[startIndex...]
             let trimmedInput = LMInput(tokens: remainingTokens)
-            let stream = try MLXLMCommon.generate(
+            stream = try MLXLMCommon.generate(
                 input: trimmedInput, cache: cache, parameters: params, context: context
             )
-            // Save prompt tokens + KV state synchronously after the partial prefill.
-            await promptCache.save(tokens: promptTokens, cache: cache)
-            return stream
         } else {
             // Cache miss: process the full prompt.
-            let stream = try MLXLMCommon.generate(
+            stream = try MLXLMCommon.generate(
                 input: lmInput, cache: cache, parameters: params, context: context
             )
-            // Save prompt tokens + KV state synchronously after the full prefill.
-            await promptCache.save(tokens: promptTokens, cache: cache)
-            return stream
         }
+        
+        // Return a closure that will save the cache state synchronously AFTER
+        // the generator stream has evaluated the prefill (on its very first token).
+        let onPrefillDone: (() async -> Void)? = {
+            await promptCache.save(tokens: promptTokens, cache: cache)
+        }
+        return (stream, onPrefillDone)
     }
 
     let modelId = config.modelId
@@ -1020,14 +1022,14 @@ func handleChatCompletion(
             stream: stream, modelId: modelId, stopSequences: stopSequences,
             includeUsage: includeUsage, promptTokenCount: promptTokenCount,
             enableThinking: enableThinking, jsonMode: jsonMode, semaphore: semaphore,
-            stats: stats, genStart: genStart, prefillStart: prefillStart
+            stats: stats, genStart: genStart, prefillStart: prefillStart, onPrefillDone: onPrefillDone
         )
     } else {
         return try await handleChatNonStreaming(
             stream: stream, modelId: modelId, stopSequences: stopSequences,
             promptTokenCount: promptTokenCount, enableThinking: enableThinking,
             jsonMode: jsonMode, semaphore: semaphore,
-            stats: stats, genStart: genStart, prefillStart: prefillStart
+            stats: stats, genStart: genStart, prefillStart: prefillStart, onPrefillDone: onPrefillDone
         )
     }
 }
@@ -1122,7 +1124,8 @@ func handleChatStreaming(
     semaphore: AsyncSemaphore,
     stats: ServerStats,
     genStart: Date,
-    prefillStart: Date
+    prefillStart: Date,
+    onPrefillDone: (() async -> Void)? = nil
 ) -> Response {
     let (sseStream, cont) = AsyncStream<String>.makeStream()
 
@@ -1177,6 +1180,7 @@ func handleChatStreaming(
                     let prefillTokPerSec = prefillDur > 0 ? Double(promptTokenCount) / prefillDur : 0
                     print("srv  slot update: id 0 | prefill done | n_tokens=\(promptTokenCount), t=\(String(format: "%.2f", prefillDur))s, \(String(format: "%.1f", prefillTokPerSec))t/s")
                     print("srv  generate: id 0 | ", terminator: "")
+                    if let onPrefillDone { await onPrefillDone() }
                     firstToken = false
                 }
                 print(text, terminator: "")
@@ -1292,7 +1296,8 @@ func handleChatNonStreaming(
     semaphore: AsyncSemaphore,
     stats: ServerStats,
     genStart: Date,
-    prefillStart: Date
+    prefillStart: Date,
+    onPrefillDone: (() async -> Void)? = nil
 ) async throws -> Response {
     var fullText = ""
     var completionTokenCount = 0
@@ -1315,6 +1320,7 @@ func handleChatNonStreaming(
                 let prefillTokPerSec = prefillDur > 0 ? Double(promptTokenCount) / prefillDur : 0
                 print("srv  slot update: id 0 | prefill done | n_tokens=\(promptTokenCount), t=\(String(format: "%.2f", prefillDur))s, \(String(format: "%.1f", prefillTokPerSec))t/s")
                 print("srv  generate: id 0 | ", terminator: "")
+                if let onPrefillDone { await onPrefillDone() }
                 firstToken = false
             }
             print(text, terminator: "")
