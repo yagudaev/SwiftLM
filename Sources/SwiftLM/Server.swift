@@ -14,10 +14,61 @@ import CoreImage
 import Foundation
 import HTTPTypes
 import Hummingbird
+import Hub
 import MLX
 import MLXLLM
 import MLXLMCommon
 import MLXVLM
+import Tokenizers
+
+// ── Hub/Tokenizer bridges (Downloader + TokenizerLoader conformances) ─────────
+
+private struct HubDownloader: Downloader, Sendable {
+    let hub: HubApi
+    func download(
+        id: String, revision: String?,
+        matching patterns: [String],
+        useLatest: Bool,
+        progressHandler: @Sendable @escaping (Progress) -> Void
+    ) async throws -> URL {
+        try await hub.snapshot(from: id, matching: patterns, progressHandler: progressHandler)
+    }
+}
+
+private struct TransformersTokenizerLoader: TokenizerLoader, Sendable {
+    func load(from directory: URL) async throws -> any MLXLMCommon.Tokenizer {
+        let t = try await AutoTokenizer.from(modelFolder: directory)
+        return TransformersTokenizerBridge(t)
+    }
+}
+
+private struct TransformersTokenizerBridge: MLXLMCommon.Tokenizer, Sendable {
+    let upstream: any Tokenizers.Tokenizer
+    init(_ upstream: any Tokenizers.Tokenizer) { self.upstream = upstream }
+    func encode(text: String, addSpecialTokens: Bool) -> [Int] {
+        upstream.encode(text: text, addSpecialTokens: addSpecialTokens)
+    }
+    func decode(tokenIds: [Int], skipSpecialTokens: Bool) -> String {
+        upstream.decode(tokens: tokenIds, skipSpecialTokens: skipSpecialTokens)
+    }
+    func convertTokenToId(_ token: String) -> Int? { upstream.convertTokenToId(token) }
+    func convertIdToToken(_ id: Int) -> String? { upstream.convertIdToToken(id) }
+    var bosToken: String? { upstream.bosToken }
+    var eosToken: String? { upstream.eosToken }
+    var unknownToken: String? { upstream.unknownToken }
+    func applyChatTemplate(
+        messages: [[String: any Sendable]],
+        tools: [[String: any Sendable]]?,
+        additionalContext: [String: any Sendable]?
+    ) throws -> [Int] {
+        do {
+            return try upstream.applyChatTemplate(
+                messages: messages, tools: tools, additionalContext: additionalContext)
+        } catch Tokenizers.TokenizerError.missingChatTemplate {
+            throw MLXLMCommon.TokenizerError.missingChatTemplate
+        }
+    }
+}
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
@@ -332,20 +383,31 @@ struct MLXServer: AsyncParsableCommand {
         }()
         let tracker = ProgressTracker(modelId: resolvedModelId)
         
+        let cacheRoot = URL.applicationSupportDirectory
+            .appendingPathComponent("MLX", isDirectory: true)
+            .appendingPathComponent("HuggingFace", isDirectory: true)
         if isVision {
             print("[SwiftLM] Loading VLM (vision-language model)...")
+            let downloader = HubDownloader(hub: HubApi(downloadBase: cacheRoot))
             container = try await VLMModelFactory.shared.loadContainer(
+                from: downloader,
+                using: TransformersTokenizerLoader(),
                 configuration: modelConfig
             ) { progress in
                 tracker.printProgress(progress)
             }
         } else {
+            let downloader = HubDownloader(hub: HubApi(downloadBase: cacheRoot))
             container = try await LLMModelFactory.shared.loadContainer(
+                from: downloader,
+                using: TransformersTokenizerLoader(),
                 configuration: modelConfig
             ) { progress in
                 tracker.printProgress(progress)
             }
         }
+
+        print("[SwiftLM] Loaded model configuration. Inferred tool call format: \(String(describing: await container.configuration.toolCallFormat))")
 
         // ── Apply GPU/CPU layer partitioning ──
         if let gpuCount = requestedGPULayers {
@@ -914,7 +976,22 @@ func handleChatCompletion(
             chatMessages.append(.system(textContent, images: images))
             systemPromptText += textContent
         case "assistant":
-            chatMessages.append(.assistant(textContent, images: images))
+            var formattedToolCalls: [[String: any Sendable]]? = nil
+            if let tc = msg.tool_calls, !tc.isEmpty {
+                formattedToolCalls = tc.map { call in
+                    [
+                        "id": call.id,
+                        "type": call.type,
+                        "function": [
+                            "name": call.function.name,
+                            "arguments": call.function.arguments
+                        ] as [String: any Sendable]
+                    ] as [String: any Sendable]
+                }
+            }
+            chatMessages.append(.assistant(textContent, images: images, toolCalls: formattedToolCalls))
+        case "tool":
+            chatMessages.append(.tool(textContent, toolCallId: msg.tool_call_id))
         default:
             chatMessages.append(.user(textContent, images: images))
         }
@@ -1885,6 +1962,8 @@ struct ChatCompletionRequest: Decodable {
     struct Message: Decodable {
         let role: String
         let content: MessageContent?
+        let tool_calls: [ToolCallResponse]?
+        let tool_call_id: String?
 
         /// Extract plain text from content (handles both string and multipart)
         var textContent: String {
@@ -1932,11 +2011,11 @@ struct ChatCompletionRequest: Decodable {
         case string(String)
         case parts([ContentPart])
 
-        init(from decoder: Decoder) throws {
-            let container = try decoder.singleValueContainer()
-            if let str = try? container.decode(String.self) {
+        init(from decoder: Swift.Decoder) throws {
+            let svc = try decoder.singleValueContainer()
+            if let str = try? svc.decode(String.self) {
                 self = .string(str)
-            } else if let parts = try? container.decode([ContentPart].self) {
+            } else if let parts = try? svc.decode([ContentPart].self) {
                 self = .parts(parts)
             } else {
                 self = .string("")
@@ -2065,13 +2144,13 @@ struct AssistantMessage: Encodable {
     }
 }
 
-struct ToolCallResponse: Encodable {
+struct ToolCallResponse: Codable {
     let id: String
     let type: String
     let function: ToolCallFunction
 }
 
-struct ToolCallFunction: Encodable {
+struct ToolCallFunction: Codable {
     let name: String
     let arguments: String
 }
@@ -2096,22 +2175,34 @@ struct TextChoice: Encodable {
     }
 }
 
-struct AnyCodable: Decodable, Sendable {
+// AnyCodable: a Sendable-compatible type-erased JSON value.
+// `value` stores only Sendable-compatible Foundation types: Bool, Int, Double,
+// String, NSNull, [AnyCodable.SendableValue], [String: AnyCodable.SendableValue]
+// AnyCodable: a type-erased JSON value that bridges to Foundation types.
+// Marked @unchecked Sendable: all stored types (Bool/Int/Double/String/NSNull/
+// recursive AnyCodable) are in fact Sendable; `Any` is used for ergonomic storage.
+// AnyCodable: type-erased Decodable wrapper over JSON scalars/arrays/objects.
+// `value` holds Sendable-safe Foundation types (Bool/Int/Double/String/NSNull + collections).
+struct AnyCodable: @unchecked Sendable {
     let value: Any
-    init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        if c.decodeNil() { value = NSNull() }
-        else if let b = try? c.decode(Bool.self) { value = b }
-        else if let i = try? c.decode(Int.self) { value = i }
-        else if let d = try? c.decode(Double.self) { value = d }
-        else if let s = try? c.decode(String.self) { value = s }
-        else if let a = try? c.decode([AnyCodable].self) { value = a.map { $0.value } }
-        else if let d = try? c.decode([String: AnyCodable].self) { value = d.mapValues { $0.value } }
-        else { value = NSNull() }
-    }
+
     static func toSendable(_ dict: [String: AnyCodable]?) -> [String: any Sendable]? {
         guard let dict else { return nil }
         return dict.mapValues { $0.value as! any Sendable }
+    }
+}
+
+extension AnyCodable: Decodable {
+    init(from decoder: Swift.Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if (try? c.decodeNil()) == true { value = NSNull(); return }
+        if let b = try? c.decode(Bool.self)   { value = b; return }
+        if let i = try? c.decode(Int.self)    { value = i; return }
+        if let d = try? c.decode(Double.self) { value = d; return }
+        if let s = try? c.decode(String.self) { value = s; return }
+        if let a = try? c.decode([AnyCodable].self) { value = a.map { $0.value }; return }
+        if let o = try? c.decode([String: AnyCodable].self) { value = o.mapValues { $0.value }; return }
+        value = NSNull()
     }
 }
 
