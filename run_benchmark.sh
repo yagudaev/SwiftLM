@@ -8,21 +8,63 @@ echo "    Aegis-AI MLX Profiling Benchmark Suite    "
 echo "=============================================="
 echo ""
 
-echo "Select Benchmark Suite:"
+echo "Select Action:"
 echo "1) Test 1: Automated Context & Memory Profile (TPS & RAM matrix)"
 echo "2) Test 2: Prompt Cache & Sliding Window Regression Test"
-echo "3) Quit"
-read -p "Option (1-3): " suite_opt
+echo "3) Model Maintain List and Delete"
+echo "4) Quit"
+read -p "Option (1-4): " suite_opt
 
-if [ "$suite_opt" == "3" ] || [ -z "$suite_opt" ]; then
+if [ "$suite_opt" == "4" ] || [ -z "$suite_opt" ]; then
     echo "Exiting."
     exit 0
 fi
 
+if [ "$suite_opt" == "3" ]; then
+    echo ""
+    echo "=> Downloaded Models Maintenance"
+    CACHE_DIR="$HOME/.cache/huggingface/hub"
+    if [ ! -d "$CACHE_DIR" ]; then
+        echo "Cache directory $CACHE_DIR not found."
+        exit 1
+    fi
+    cd "$CACHE_DIR" || exit 1
+    
+    while true; do
+        models=(models--*)
+        if [ "${models[0]}" == "models--*" ]; then
+            echo "No models found."
+            exit 0
+        fi
+        
+        echo ""
+        echo "Downloaded Models:"
+        for i in "${!models[@]}"; do
+            size=$(du -sh "${models[$i]}" | cut -f1)
+            name=$(echo ${models[$i]} | sed 's/models--//' | sed 's/--/\//g')
+            echo "$((i+1))) $name ($size)"
+        done
+        echo "$(( ${#models[@]} + 1 ))) Quit"
+        
+        read -p "Select a model to delete (1-$(( ${#models[@]} + 1 ))): " del_opt
+        if [[ "$del_opt" =~ ^[0-9]+$ ]] && [ "$del_opt" -gt 0 ] && [ "$del_opt" -le "${#models[@]}" ]; then
+            target_dir="${models[$((del_opt-1))]}"
+            echo "Deleting $target_dir..."
+            rm -rf "$target_dir"
+            echo "✅ Deleted."
+        else
+            echo "Exiting."
+            exit 0
+        fi
+    done
+fi
+
 echo ""
-PS3="Select a model to use (1-8): "
+PS3="Select a model to use: "
 options=(
     "gemma-4-26b-a4b-it-8bit"
+    "gemma-4-31b-it-8bit"
+    "gemma-4-e4b-it-8bit"
     "gemma-4-26b-a4b-it-4bit"
     "gemma-4-2b-a4b-it-4bit"
     "Qwen3.5-7B-Instruct-4bit"
