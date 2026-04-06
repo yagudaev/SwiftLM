@@ -75,29 +75,25 @@ Reference implementations: [`turboquant-mlx`](https://github.com/sharpner/turboq
 
 ## 💻 Benchmarks & Testing
 
-### Test 1: Automated Extreme Context Benchmark
-Run the automated profiling suite on your device to test generation speed and GPU memory allocation across extreme context lengths (up to 100K tokens):
+Run our automated benchmark suites via the interactive script:
 ```bash
 ./run_benchmark.sh
 ```
-> The interactive script lets you pick a model and context sizes. Results are saved to `profiling_results_<hostname>.md` with a rich console visualization.
+
+The script provides an interactive menu to select any model and run one of two automated testing suites:
+
+### Test 1: Automated Context & Memory Profile (TPS & RAM matrix)
+Tests generation speed (TPS) and granular Apple Metal GPU memory allocation across extreme context lengths (e.g., `512, 40000, 100000` tokens).
+- Iterates over 4 configurations: Vanilla, SSD Streaming, TurboQuant, and SSD + TurboQuant.
+- Generates a rich ANSI console visualization with bar charts and a configuration scoreboard.
+- Saves the complete results matrix to `profiling_results_<hostname>.md`.
 
 ### Test 2: Prompt Cache & Sliding Window Regression Test
-To verify the stability of the prompt cache when interleaving long contexts with sliding window attention (e.g. Gemma 4/Mistral 3), run this extreme test sequence:
-```bash
-# 1. Start the server with a large sliding-window MoE model
-.build/release/SwiftLM --model mlx-community/gemma-4-26b-a4b-it-4bit --port 5431 --turbo-kv --stream-experts --ctx-size 16384
-
-# 2. Run the 4-request sliding window regression test.
-# (Note: This assumes you have created a /tmp/big_prompt.json file matching the OpenAI request
-# format with a large ~5K token string inside the "content" field.)
-echo "=== Req 1 (Big 5537t) ===" && curl -sS --max-time 120 http://127.0.0.1:5431/v1/chat/completions -H "Content-Type: application/json" -d @/tmp/big_prompt.json 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK:',d['choices'][0]['message']['content'])" && \
-echo "=== Req 2 (Short 18t) ===" && curl -sS --max-time 60 http://127.0.0.1:5431/v1/chat/completions -H "Content-Type: application/json" -d '{"messages":[{"role":"user","content":"What is today?"}],"max_tokens":30}' 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK:',d['choices'][0]['message']['content'])" && \
-echo "=== Req 3 (Big 5537t) ===" && curl -sS --max-time 120 http://127.0.0.1:5431/v1/chat/completions -H "Content-Type: application/json" -d @/tmp/big_prompt.json 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK:',d['choices'][0]['message']['content'])" && \
-echo "=== Req 4 (Big Full Cache Hit) ===" && curl -sS --max-time 120 http://127.0.0.1:5431/v1/chat/completions -H "Content-Type: application/json" -d @/tmp/big_prompt.json 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK:',d['choices'][0]['message']['content'])" && \
-echo "=== ALL 4 PASSED ===" && killall SwiftLM
-```
-If you see `ALL 4 PASSED` without `SIGTRAP` or `curl: (52) Empty reply from server`, the memory bounds are stable.
+Verifies the stability of the engine's KV prompt cache when interleaving long contexts with sliding window attention bounds.
+- Automatically spins up an isolated background inference server instance.
+- Generates a 5,000+ token mock JSON payload.
+- Fires an extreme alternating sequence of 4 concurrent requests (`5537t` → `18t` → `5537t` → `Big Full Cache Hit`).
+- Confirms the memory bounds remain stable without throwing $O(N^2)$ OS memory warnings, $OOM$ exceptions, or `SIGTRAP` errors.
 
 ### Throughput & Inference Memory Profile
 Tested by rendering exactly 20 tokens under standard conversational evaluation (`--prefill-size 512`) to capture precise Token Generation (TPS) and Apple Metal memory footprint limits:
