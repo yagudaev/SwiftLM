@@ -138,7 +138,7 @@ if [ "$suite_opt" == "2" ]; then
     echo "Starting Server in background..."
     killall SwiftLM 2>/dev/null
     mkdir -p tmp
-    $BIN --model "$FULL_MODEL" --port 5431 --turbo-kv --stream-experts --ctx-size 16384 > ./tmp/regression_server.log 2>&1 &
+    $BIN --model "$FULL_MODEL" --port 5431 --stream-experts --ctx-size 16384 > ./tmp/regression_server.log 2>&1 &
     SERVER_PID=$!
     
     echo "Waiting for server to be ready on port 5431 (this may take a minute if downloading)..."
@@ -175,7 +175,7 @@ if [ "$suite_opt" == "3" ]; then
     echo "Starting Server in background..."
     killall SwiftLM 2>/dev/null
     mkdir -p tmp
-    $BIN --model "$FULL_MODEL" --port 5431 --turbo-kv --stream-experts --ctx-size 8192 > ./tmp/homesec_server.log 2>&1 &
+    $BIN --model "$FULL_MODEL" --port 5431 --stream-experts --ctx-size 8192 > ./tmp/homesec_server.log 2>&1 &
     SERVER_PID=$!
     
     echo "Waiting for server to be ready on port 5431 (this may take a minute if downloading)..."
