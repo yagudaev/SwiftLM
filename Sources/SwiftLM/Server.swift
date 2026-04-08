@@ -294,8 +294,10 @@ struct MLXServer: AsyncParsableCommand {
         }
         
         var partitionPlan: PartitionPlan?
+        var modelContextLength: Int?
         if let modelDir = modelDirectory,
            let profile = ModelProfiler.profile(modelDirectory: modelDir, modelId: modelId) {
+            modelContextLength = profile.maxPositionEmbeddings
             let system = ModelProfiler.systemProfile()
             let contextSize = self.ctxSize ?? 4096
             let plan = ModelProfiler.plan(model: profile, system: system, contextSize: contextSize)
@@ -562,9 +564,10 @@ struct MLXServer: AsyncParsableCommand {
             return caps
         }()
         let capsJson = "[" + modelCapabilities.map { "\"\($0)\"" }.joined(separator: ",") + "]"
+        let ctxLenJson = modelContextLength.map { ",\"context_length\":\($0)" } ?? ""
         router.get("/v1/models") { _, _ -> Response in
             let payload = """
-            {"object":"list","data":[{"id":"\(modelId)","object":"model","created":\(Int(Date().timeIntervalSince1970)),"owned_by":"mlx-community","capabilities":\(capsJson)}]}
+            {"object":"list","data":[{"id":"\(modelId)","object":"model","created":\(Int(Date().timeIntervalSince1970)),"owned_by":"mlx-community","capabilities":\(capsJson)\(ctxLenJson)}]}
             """
             return Response(
                 status: .ok,
