@@ -31,6 +31,7 @@ struct ModelProfile: Sendable {
     let numActiveExperts: Int?
     let weightFileSizeBytes: Int
     let modelId: String
+    let maxPositionEmbeddings: Int?
 
     /// Estimated total parameters in billions (rough)
     var estimatedParamsB: Double {
@@ -178,6 +179,8 @@ enum ModelProfiler {
         let numExperts: Int?
         let numExpertsPerTok: Int?
         let quantizationConfig: QuantConfig?
+        let maxPositionEmbeddings: Int?
+        let textConfig: TextConfig?
 
         enum CodingKeys: String, CodingKey {
             case modelType = "model_type"
@@ -191,6 +194,21 @@ enum ModelProfiler {
             case numExperts = "num_local_experts"
             case numExpertsPerTok = "num_experts_per_tok"
             case quantizationConfig = "quantization_config"
+            case maxPositionEmbeddings = "max_position_embeddings"
+            case textConfig = "text_config"
+        }
+
+        /// Resolve max context length: top-level or nested under text_config (VLM models)
+        var resolvedMaxPositionEmbeddings: Int? {
+            maxPositionEmbeddings ?? textConfig?.maxPositionEmbeddings
+        }
+    }
+
+    private struct TextConfig: Decodable {
+        let maxPositionEmbeddings: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case maxPositionEmbeddings = "max_position_embeddings"
         }
     }
 
@@ -251,7 +269,8 @@ enum ModelProfiler {
             numExperts: numExperts,
             numActiveExperts: numActiveExperts,
             weightFileSizeBytes: weightSize,
-            modelId: modelId
+            modelId: modelId,
+            maxPositionEmbeddings: config.resolvedMaxPositionEmbeddings
         )
     }
 
