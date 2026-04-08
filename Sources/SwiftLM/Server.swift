@@ -553,10 +553,18 @@ struct MLXServer: AsyncParsableCommand {
             )
         }
 
-        // Models list
+        // Models list (extended with capabilities array following Ollama convention)
+        let modelCapabilities: [String] = {
+            var caps = ["completion"]
+            if isVision { caps.append("vision") }
+            if config.thinking { caps.append("thinking") }
+            caps.append("tools")
+            return caps
+        }()
+        let capsJson = "[" + modelCapabilities.map { "\"\($0)\"" }.joined(separator: ",") + "]"
         router.get("/v1/models") { _, _ -> Response in
             let payload = """
-            {"object":"list","data":[{"id":"\(modelId)","object":"model","created":\(Int(Date().timeIntervalSince1970)),"owned_by":"mlx-community"}]}
+            {"object":"list","data":[{"id":"\(modelId)","object":"model","created":\(Int(Date().timeIntervalSince1970)),"owned_by":"mlx-community","capabilities":\(capsJson)}]}
             """
             return Response(
                 status: .ok,
