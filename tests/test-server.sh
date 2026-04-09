@@ -867,6 +867,58 @@ else
 fi
 
 
+# ── Test 27b: Multi-turn tool calling (arguments survive history) ─────
+log "Test 27b: Multi-turn tool calling — arguments not empty on second turn"
+
+# Extract tool call from Turn 1 (Test 27) so we can feed it back as history
+TURN1_TOOL_ID=$(echo "$TOOLS_RESP" | jq -r '.choices[0].message.tool_calls[0].id // empty')
+TURN1_TOOL_NAME=$(echo "$TOOLS_RESP" | jq -r '.choices[0].message.tool_calls[0].function.name // empty')
+TURN1_TOOL_ARGS=$(echo "$TOOLS_RESP" | jq -r '.choices[0].message.tool_calls[0].function.arguments // empty')
+
+if [ -z "$TURN1_TOOL_ID" ] || [ -z "$TURN1_TOOL_NAME" ] || [ -z "$TURN1_TOOL_ARGS" ] || [ "$TURN1_TOOL_ARGS" = "{}" ]; then
+    fail "Multi-turn tool call: Turn 1 did not produce a usable tool call"
+else
+    # Build Turn 2 payload with the tool call history from Turn 1
+    TURN2_ARGS_ESCAPED=$(echo "$TURN1_TOOL_ARGS" | jq -Rs '.')
+    TURN2_PAYLOAD=$(cat <<ENDTURN2
+{
+  "model": "$MODEL",
+  "max_tokens": 100,
+  "messages": [
+    {"role": "user", "content": "What is 2+2? Use the calculator tool."},
+    {"role": "assistant", "content": null, "tool_calls": [{"id": "$TURN1_TOOL_ID", "type": "function", "function": {"name": "$TURN1_TOOL_NAME", "arguments": $TURN2_ARGS_ESCAPED}}]},
+    {"role": "tool", "tool_call_id": "$TURN1_TOOL_ID", "content": "4"},
+    {"role": "user", "content": "Now calculate 10 * 5. Use the calculator tool."}
+  ],
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "calculator",
+      "description": "Performs arithmetic",
+      "parameters": {
+        "type": "object",
+        "properties": { "expression": {"type": "string"} }
+      }
+    }
+  }]
+}
+ENDTURN2
+)
+
+    TURN2_RESP=$(curl -s -X POST "$URL/v1/chat/completions" \
+        -H "Content-Type: application/json" \
+        -d "$TURN2_PAYLOAD" || true)
+
+    TURN2_TOOL_ARGS=$(echo "$TURN2_RESP" | jq -r '.choices[0].message.tool_calls[0].function.arguments // empty')
+
+    if [ -n "$TURN2_TOOL_ARGS" ] && [ "$TURN2_TOOL_ARGS" != "{}" ]; then
+        pass "Multi-turn tool call: Turn 2 arguments are populated ($TURN2_TOOL_ARGS)"
+    else
+        fail "Multi-turn tool call: Turn 2 arguments are empty (got: ${TURN2_TOOL_ARGS:-null})"
+    fi
+fi
+
+
 # ── Test 28: Health endpoint includes partition plan ──────────────────
 log "Test 28: Health endpoint partition/memory plan fields"
 

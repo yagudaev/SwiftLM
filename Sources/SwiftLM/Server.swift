@@ -990,12 +990,20 @@ func handleChatCompletion(
             var formattedToolCalls: [[String: any Sendable]]? = nil
             if let tc = msg.tool_calls, !tc.isEmpty {
                 formattedToolCalls = tc.map { call in
-                    [
+                    // Jinja templates expect arguments as a dict, not the JSON string the OpenAI API uses.
+                    let argsValue: any Sendable
+                    if let data = call.function.arguments.data(using: .utf8),
+                       let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: any Sendable] {
+                        argsValue = parsed
+                    } else {
+                        argsValue = call.function.arguments
+                    }
+                    return [
                         "id": call.id,
                         "type": call.type,
                         "function": [
                             "name": call.function.name,
-                            "arguments": call.function.arguments
+                            "arguments": argsValue
                         ] as [String: any Sendable]
                     ] as [String: any Sendable]
                 }
