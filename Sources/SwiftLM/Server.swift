@@ -990,11 +990,7 @@ func handleChatCompletion(
             var formattedToolCalls: [[String: any Sendable]]? = nil
             if let tc = msg.tool_calls, !tc.isEmpty {
                 formattedToolCalls = tc.map { call in
-                    // Parse arguments from JSON string to dictionary for chat template.
-                    // OpenAI API sends arguments as a JSON string, but Jinja templates
-                    // (e.g. Qwen3.5) expect a dictionary to iterate with |items.
-                    // Fall back to raw string if parsing fails — newer templates handle
-                    // strings via `is string` guards, and preserving data beats silent loss.
+                    // Jinja templates expect arguments as a dict, not the JSON string the OpenAI API uses.
                     let argsValue: any Sendable
                     if let data = call.function.arguments.data(using: .utf8),
                        let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: any Sendable] {
