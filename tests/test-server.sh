@@ -876,7 +876,7 @@ TURN1_TOOL_NAME=$(echo "$TOOLS_RESP" | jq -r '.choices[0].message.tool_calls[0].
 TURN1_TOOL_ARGS=$(echo "$TOOLS_RESP" | jq -r '.choices[0].message.tool_calls[0].function.arguments // empty')
 
 if [ -z "$TURN1_TOOL_ID" ] || [ -z "$TURN1_TOOL_NAME" ] || [ -z "$TURN1_TOOL_ARGS" ] || [ "$TURN1_TOOL_ARGS" = "{}" ]; then
-    log "  ⚠️  Skipping multi-turn test: Turn 1 did not produce a usable tool call"
+    fail "Multi-turn tool call: Turn 1 did not produce a usable tool call"
 else
     # Build Turn 2 payload with the tool call history from Turn 1
     TURN2_ARGS_ESCAPED=$(echo "$TURN1_TOOL_ARGS" | jq -Rs '.')
